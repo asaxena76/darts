@@ -59,8 +59,8 @@ class NaiveLastHourCarryForward(DisneyModel):
             last_val = infer_history_df[self.target_col].dropna().iloc[-1] if not infer_history_df[self.target_col].dropna().empty else 0.0
 
         start = infer_history_df.index.max()
-        # start at the next minute after the latest history timestamp
-        start_minute = (start + pd.Timedelta(minutes=1)).ceil("min")
+        # start at the next hour after the latest history timestamp
+        start_minute = (start + pd.Timedelta(hours=1)).ceil("min")
 
         if start_minute >= park_close_ts:
             return pd.Series(dtype=float)

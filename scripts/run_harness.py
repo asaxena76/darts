@@ -24,13 +24,6 @@ def main():
         default="results",
         help="Base directory to write experiment outputs (default: results/)",
     )
-    cfg = HarnessConfig(
-        csv_path=args.csv,
-        test_days=args.test_days,
-        debug_sample=args.debug_sample,
-        debug_rows=args.debug_rows,
-        debug_infer_hour=args.debug_infer_hour,
-    )
     ap.add_argument(
         "--debug-infer-hour",
         type=int,
@@ -47,12 +40,6 @@ def main():
         type=int,
         default=20,
         help="How many rows to print in the debug sample (default: 20).",
-    )
-    ap.add_argument(
-        "--debug-infer-hour",
-        type=int,
-        default=12,
-        help="Hour-of-day (0-23) to trigger the debug sample on the FIRST test day (default: 12).",
     )
     ap.add_argument(
         "--log-level",

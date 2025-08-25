@@ -104,7 +104,7 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
             for infer_hour in range(PARK_OPEN_HOUR, PARK_CLOSE_HOUR):
                 infer_ts = day + pd.Timedelta(hours=infer_hour)
                 # history available up to infer_ts
-                hist_to_now = df[(df[cfg.attraction_col] == gw) & (df[cfg.ts_col] <= infer_ts)].set_index(cfg.ts_col)
+                hist_to_now = df[(df[cfg.attraction_col] == gw) & (df[cfg.ts_col] < infer_ts)].set_index(cfg.ts_col)
 
                 # predict minute-level from (infer_ts+1min) to close
                 pred = model.predict_until_close(hist_to_now, park_close)
