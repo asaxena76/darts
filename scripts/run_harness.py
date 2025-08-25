@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 
 from disney_harness.harness import HarnessConfig, evaluate_model
 from disney_harness.model import NaiveLastHourCarryForward
+from disney_harness.model import DartsLGBMDisneyModel
 
 def main():
     ap = argparse.ArgumentParser()
