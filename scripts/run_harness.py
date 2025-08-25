@@ -67,7 +67,18 @@ def main():
         debug_rows=args.debug_rows,
         debug_infer_hour=args.debug_infer_hour,
     )
-    model = NaiveLastHourCarryForward(target_col=cfg.target_col)
+    model = DartsLGBMDisneyModel(
+        target_col=cfg.target_col,
+        covariate_cols=[
+            # keep any that exist in your CSV; others are ignored gracefully
+            "mwt", "mrtd_prev", "mwt_prev", "am_prev", "om_prev",
+            "mrtd_sum_prev", "mwt_sum_prev", "am_sum_prev", "om_sum_prev",
+        ],
+        lags=24,
+        lags_past_covariates=2,
+        output_chunk_length=24,
+        random_state=42,
+    )
 
     # --- prepare run output dir: results/{timestamp}__{args_slug}/
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
