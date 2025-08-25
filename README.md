@@ -1,3 +1,9 @@
+# My customizations
+I created a new conda env
+    conda create --name darts-env python=3.9
+    conda activate darts-env
+    conda install -c conda-forge -c pytorch u8darts-all
+
 # Time Series Made Easy in Python
 
 ![darts](https://github.com/unit8co/darts/raw/master/static/images/darts-logo-trim.png "darts")
