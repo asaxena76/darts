@@ -24,6 +24,19 @@ def main():
         default="results",
         help="Base directory to write experiment outputs (default: results/)",
     )
+    cfg = HarnessConfig(
+        csv_path=args.csv,
+        test_days=args.test_days,
+        debug_sample=args.debug_sample,
+        debug_rows=args.debug_rows,
+        debug_infer_hour=args.debug_infer_hour,
+    )
+    ap.add_argument(
+        "--debug-infer-hour",
+        type=int,
+        default=12,
+        help="Hour-of-day (0-23) to trigger the debug sample on the FIRST test day (default: 12).",
+    )
     ap.add_argument(
         "--debug-sample",
         action="store_true",
@@ -78,6 +91,7 @@ def main():
         "daily_train_cutoff_hour": cfg.daily_train_cutoff_hour,
         "park_hours": {"open": 8, "close": 24},
         "debug_sample": cfg.debug_sample,
+        "debug_infer_hour": cfg.debug_infer_hour,
         "debug_rows": cfg.debug_rows,
     }, indent=2))
     (run_dir / "INPUT_CSV_PATH.txt").write_text(str(Path(args.csv).resolve()))
