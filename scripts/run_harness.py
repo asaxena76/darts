@@ -49,6 +49,12 @@ def main():
         help="How many rows to print in the debug sample (default: 20).",
     )
     ap.add_argument(
+        "--debug-infer-hour",
+        type=int,
+        default=12,
+        help="Hour-of-day (0-23) to trigger the debug sample on the FIRST test day (default: 12).",
+    )
+    ap.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
@@ -71,6 +77,7 @@ def main():
         test_days=args.test_days,
         debug_sample=args.debug_sample,
         debug_rows=args.debug_rows,
+        debug_infer_hour=args.debug_infer_hour,
     )
     model = NaiveLastHourCarryForward(target_col=cfg.target_col)
 
