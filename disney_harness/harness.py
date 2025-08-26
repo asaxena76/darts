@@ -107,7 +107,7 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
                 hist_to_now = df[(df[cfg.attraction_col] == gw) & (df[cfg.ts_col] < infer_ts)].set_index(cfg.ts_col)
 
                 # predict minute-level from (infer_ts+1min) to close
-                pred = model.predict_until_close(hist_to_now, park_close)
+                pred = model.predict_hourly_until_close(hist_to_now, park_close)
 
                 # restrict truth to same prediction window
                 truth_window = truth_hourly.loc[pred.index.min(): pred.index.max()] if not pred.empty else pd.Series(dtype=float)
