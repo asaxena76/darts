@@ -95,6 +95,8 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
 
             # Build hourly TRUTH for the full day window
             truth_hourly = _hourly_truth_for_day(day_df[day_df[cfg.attraction_col] == gw], cfg)
+            # Fill na to 0
+            truth_hourly = truth_hourly.fillna(0.0)
 
             # infer from each hour (open..23)
             for infer_hour in range(PARK_OPEN_HOUR, PARK_CLOSE_HOUR):
@@ -104,6 +106,7 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
 
                 # predict minute-level from (infer_ts+1min) to close
                 pred = model.predict_until_close(hist_to_now, park_close)
+
 
                 # restrict truth to same prediction window
                 truth_window = truth_hourly.loc[pred.index.min(): pred.index.max()] if not pred.empty else pd.Series(dtype=float)
@@ -118,6 +121,13 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
                     # "first day" in the selected test set
                     and day == test_days.iloc[0]
                 ):
+                    # print predictions
+                    print(f"\n[DEBUG] Predictions for '{gw}' on {day.date()} at infer_hour={infer_hour} (from {pred.index.min()} to {pred.index.max()}):")
+                    print(pred.head(cfg.debug_rows).rename("pred").reset_index().to_string(index=False))
+                    # print truth
+                    print(f"\n[DEBUG] Truth for '{gw}' on {day.date()} (park hours {PARK_OPEN_HOUR}:00 to {PARK_CLOSE_HOUR}:00):")
+                    print(truth_hourly.head(cfg.debug_rows).rename("truth").reset_index().to_string(index=False))
+
                     # Build aligned slice for manual verification
                     aligned = pd.concat(
                         [truth_window.rename("truth"), pred.rename("pred")], axis=1

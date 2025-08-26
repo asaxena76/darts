@@ -6,6 +6,13 @@ import numpy as np
 from darts import TimeSeries
 from darts.dataprocessing.transformers import Scaler
 from darts.models import LightGBMModel
+import warnings
+warnings.filterwarnings(
+    "ignore",
+    message="X does not have valid feature names, but LGBMRegressor was fitted with feature names",
+    category=UserWarning,
+    module="sklearn.utils.validation",
+)
 
 class DisneyModel(ABC):
     """
@@ -151,6 +158,7 @@ class DartsLGBMDisneyModel(DisneyModel):
             output_chunk_length=self.output_chunk_length,
             lags_past_covariates=self.lags_past_covariates if cov_s is not None else None,
             random_state=self.random_state,
+            verbose=-1,
         )
         self.model.fit(y_s, past_covariates=cov_s)
         self._trained = True

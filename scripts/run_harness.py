@@ -7,6 +7,46 @@ from datetime import datetime
 import shutil
 import logging
 
+import warnings
+from sklearn.utils.validation import DataConversionWarning
+
+# Suppress sklearn feature name warnings
+warnings.filterwarnings(
+    "ignore",
+    message="X does not have valid feature names, but LGBMRegressor was fitted with feature names",
+    category=UserWarning,
+    module="sklearn.utils.validation",
+)
+
+import contextlib
+import sys
+import os
+
+@contextlib.contextmanager
+def tee_output(log_path):
+    """Tee all stdout/stderr to a log file as well as console."""
+    class TeeStream:
+        def __init__(self, original, logfile):
+            self.original = original
+            self.logfile = logfile
+        def write(self, data):
+            self.original.write(data)
+            self.original.flush()
+            self.logfile.write(data)
+            self.logfile.flush()
+        def flush(self):
+            self.original.flush()
+            self.logfile.flush()
+
+    with open(log_path, "w") as f:
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout, sys.stderr = TeeStream(sys.stdout, f), TeeStream(sys.stderr, f)
+        try:
+            yield
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+
+
 # ensure repo root is on sys.path so 'disney_harness' can be imported
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -87,7 +127,7 @@ def main():
     run_dir = Path(args.results_dir) / f"{ts}__{args_slug}"
     run_dir.mkdir(parents=True, exist_ok=True)
     log.info("Run directory: %s", run_dir)
-
+    log_file = run_dir / "run.log"
     # Save args & config snapshot for reproducibility
     (run_dir / "args.json").write_text(json.dumps(vars(args), indent=2))
     (run_dir / "config.json").write_text(json.dumps({
@@ -102,18 +142,19 @@ def main():
     }, indent=2))
     (run_dir / "INPUT_CSV_PATH.txt").write_text(str(Path(args.csv).resolve()))
 
-    results = evaluate_model(cfg, model)
+    with tee_output(log_file):
+        results = evaluate_model(cfg, model)
 
-    print(json.dumps({"overall": results["overall"]}, indent=2))
-    print(f"[run_dir] {run_dir}")
-    log.info("Overall summary: %s", results["overall"])
+        print(json.dumps({"overall": results["overall"]}, indent=2))
+        print(f"[run_dir] {run_dir}")
+        log.info("Overall summary: %s", results["overall"])
 
-    # write detailed outputs into run_dir
-    results["by_attraction"].to_csv(run_dir / "by_attraction.csv", index=False)
-    results["by_infer_hour"].to_csv(run_dir / "by_infer_hour.csv", index=False)
-    results["raw"].to_csv(run_dir / "raw_results.csv", index=False)
-    (run_dir / "overall.json").write_text(json.dumps(results["overall"], indent=2))
-    log.info("Wrote: by_attraction.csv, by_infer_hour.csv, raw_results.csv, overall.json")
+        # write detailed outputs into run_dir
+        results["by_attraction"].to_csv(run_dir / "by_attraction.csv", index=False)
+        results["by_infer_hour"].to_csv(run_dir / "by_infer_hour.csv", index=False)
+        results["raw"].to_csv(run_dir / "raw_results.csv", index=False)
+        (run_dir / "overall.json").write_text(json.dumps(results["overall"], indent=2))
+        log.info("Wrote: by_attraction.csv, by_infer_hour.csv, raw_results.csv, overall.json")
 
 if __name__ == "__main__":
     main()
