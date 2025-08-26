@@ -10,6 +10,7 @@ from .metrics import mae, mape
 PARK_OPEN_HOUR = 8   # 08:00
 PARK_CLOSE_HOUR = 24 # 24:00 == midnight end-of-day
 log = logging.getLogger(__name__)
+DEBUG_PRINTED= False
 
 @dataclass
 class HarnessConfig:
@@ -63,6 +64,7 @@ def _hourly_truth_for_day(day_hourly: pd.DataFrame, cfg: HarnessConfig) -> pd.Se
 def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
     df = _load_hourly_df(cfg)
     results = []
+    raw_det__rows = []
     debug_printed = False
 
     # pick last N distinct dates as test set
@@ -107,70 +109,29 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
                 # predict minute-level from (infer_ts+1min) to close
                 pred = model.predict_until_close(hist_to_now, park_close)
 
-
                 # restrict truth to same prediction window
                 truth_window = truth_hourly.loc[pred.index.min(): pred.index.max()] if not pred.empty else pd.Series(dtype=float)
 
-                # optional debug: for first test day & chosen hour, print aligned rows + tails of train/history
-                if (
-                    cfg.debug_sample
-                    and (not debug_printed)
-                    and (not pred.empty)
-                    and (not truth_window.empty)
-                    and infer_hour == cfg.debug_infer_hour
-                    # "first day" in the selected test set
-                    and day == test_days.iloc[0]
-                ):
-                    # print predictions
-                    print(f"\n[DEBUG] Predictions for '{gw}' on {day.date()} at infer_hour={infer_hour} (from {pred.index.min()} to {pred.index.max()}):")
-                    print(pred.head(cfg.debug_rows).rename("pred").reset_index().to_string(index=False))
-                    # print truth
-                    print(f"\n[DEBUG] Truth for '{gw}' on {day.date()} (park hours {PARK_OPEN_HOUR}:00 to {PARK_CLOSE_HOUR}:00):")
-                    print(truth_hourly.head(cfg.debug_rows).rename("truth").reset_index().to_string(index=False))
+                print_debug(cfg, day, df, gw, hist_to_now, infer_hour, infer_ts, pred, test_days,
+                            train_cutoff, truth_hourly, truth_window)
 
-                    # Build aligned slice for manual verification
-                    aligned = pd.concat(
-                        [truth_window.rename("truth"), pred.rename("pred")], axis=1
-                    ).dropna()
-                    if not aligned.empty:
-                        aligned = aligned.assign(abs_err=(aligned["truth"] - aligned["pred"]).abs())
-                        manual_mae = float(aligned["abs_err"].mean())
-                        head_n = aligned.head(cfg.debug_rows)
-                        print("\n========== DEBUG SAMPLE (hourly truth vs hourly pred) ==========")
-                        print(f"Day: {day.date()} | Attraction: {gw} | infer_hour: {infer_hour}")
-                        print(head_n.reset_index().rename(columns={"index": "time"}).to_string(index=False))
-                        print(f"\nmanual MAE over these {len(head_n)} rows: {manual_mae:.4f}")
-                        print("==================================================")
+                aligned_full = pd.concat([truth_window.rename("truth"), pred.rename("pred")],axis=1)
 
-                        # Print last few rows of TRAINING data used (<= train_cutoff - strictly earlier)
-                        train_tail = (
-                            df[(df[cfg.attraction_col] == gw) & (df[cfg.ts_col] < train_cutoff)]
-                            .sort_values(cfg.ts_col)
-                            .tail(cfg.debug_rows)
-                        )[[cfg.ts_col, cfg.target_col]]
-                        print("\n---------- TRAIN TAIL (<= train_cutoff) ----------")
-                        print(f"train_cutoff: {train_cutoff}")
-                        if not train_tail.empty:
-                            print(train_tail.to_string(index=False))
-                            print(f"last_train_ts: {train_tail[cfg.ts_col].max()}")
-                        else:
-                            print("(empty)")
-
-                        # Print last few rows of HISTORY available to inference (<= infer_ts)
-                        hist_tail = (
-                            hist_to_now.reset_index()
-                            .sort_values(cfg.ts_col)
-                            .tail(cfg.debug_rows)
-                        )[[cfg.ts_col, cfg.target_col]]
-                        print("\n---------- HISTORY TAIL (<= infer_ts) ------------")
-                        print(f"infer_ts: {infer_ts}")
-                        if not hist_tail.empty:
-                            print(hist_tail.to_string(index=False))
-                            print(f"last_hist_ts: {hist_tail[cfg.ts_col].max()}")
-                        else:
-                            print("(empty)")
-                        print("==================================================\n")
-                        debug_printed = True
+                for ts, row in aligned_full.iterrows():
+                    truth_val = row["truth"]
+                    pred_val = round(row["pred"])  # nearest integer
+                    abs_err = abs(truth_val - pred_val)
+                    mape_val = abs_err / (abs(truth_val)) if truth_val != 0 else 0.0
+                    raw_det__rows.append({
+                        "date": day.date(),
+                        "gw_name": gw,
+                        "infer_hour": infer_hour,
+                        "pred_hour": ts.hour,   # 8–23
+                        "truth": truth_val,
+                        "pred": pred_val,
+                        "mae": abs_err,
+                        "mape": mape_val,
+                    })
 
                 res = {
                     "date": day.date(),
@@ -190,6 +151,7 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
         log.warning("No results produced — check input coverage and filters.")
         return {"overall": {}, "by_attraction": pd.DataFrame(), "by_infer_hour": pd.DataFrame(), "raw": out}
 
+    raw_det_out = pd.DataFrame(raw_det__rows)
     summary_overall = {
         "mae": float(out["mae"].mean()),
         "mape": float(out["mape"].mean()),
@@ -200,4 +162,69 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
     by_attraction = out.groupby("gw_name")[["mae", "mape"]].mean().reset_index()
     by_infer_hour = out.groupby("infer_hour")[["mae", "mape"]].mean().reset_index()
 
-    return {"overall": summary_overall, "by_attraction": by_attraction, "by_infer_hour": by_infer_hour, "raw": out}
+    return {"overall": summary_overall, "by_attraction": by_attraction, "by_infer_hour": by_infer_hour, "raw": out, "raw_detailed": raw_det_out}
+
+def print_debug(cfg, day, df, gw, hist_to_now, infer_hour, infer_ts, pred, test_days, train_cutoff,
+                truth_hourly, truth_window):
+    # optional debug: for first test day & chosen hour, print aligned rows + tails of train/history
+    global DEBUG_PRINTED
+    if (
+            cfg.debug_sample
+            and (not DEBUG_PRINTED)
+            and (not pred.empty)
+            and (not truth_window.empty)
+            and infer_hour == cfg.debug_infer_hour
+            # "first day" in the selected test set
+            and day == test_days.iloc[0]
+    ):
+        # print predictions
+        print(
+            f"\n[DEBUG] Predictions for '{gw}' on {day.date()} at infer_hour={infer_hour} (from {pred.index.min()} to {pred.index.max()}):")
+        print(pred.head(cfg.debug_rows).rename("pred").reset_index().to_string(index=False))
+        # print truth
+        print(f"\n[DEBUG] Truth for '{gw}' on {day.date()} (park hours {PARK_OPEN_HOUR}:00 to {PARK_CLOSE_HOUR}:00):")
+        print(truth_hourly.head(cfg.debug_rows).rename("truth").reset_index().to_string(index=False))
+
+        # Build aligned slice for manual verification
+        aligned = pd.concat(
+            [truth_window.rename("truth"), pred.rename("pred")], axis=1
+        ).dropna()
+        if not aligned.empty:
+            aligned = aligned.assign(abs_err=(aligned["truth"] - aligned["pred"]).abs())
+            manual_mae = float(aligned["abs_err"].mean())
+            head_n = aligned.head(cfg.debug_rows)
+            print("\n========== DEBUG SAMPLE (hourly truth vs hourly pred) ==========")
+            print(f"Day: {day.date()} | Attraction: {gw} | infer_hour: {infer_hour}")
+            print(head_n.reset_index().rename(columns={"index": "time"}).to_string(index=False))
+            print(f"\nmanual MAE over these {len(head_n)} rows: {manual_mae:.4f}")
+            print("==================================================")
+
+            # Print last few rows of TRAINING data used (<= train_cutoff - strictly earlier)
+            train_tail = (
+                df[(df[cfg.attraction_col] == gw) & (df[cfg.ts_col] < train_cutoff)]
+                .sort_values(cfg.ts_col)
+                .tail(cfg.debug_rows)
+            )[[cfg.ts_col, cfg.target_col]]
+            print("\n---------- TRAIN TAIL (<= train_cutoff) ----------")
+            print(f"train_cutoff: {train_cutoff}")
+            if not train_tail.empty:
+                print(train_tail.to_string(index=False))
+                print(f"last_train_ts: {train_tail[cfg.ts_col].max()}")
+            else:
+                print("(empty)")
+
+            # Print last few rows of HISTORY available to inference (<= infer_ts)
+            hist_tail = (
+                hist_to_now.reset_index()
+                .sort_values(cfg.ts_col)
+                .tail(cfg.debug_rows)
+            )[[cfg.ts_col, cfg.target_col]]
+            print("\n---------- HISTORY TAIL (<= infer_ts) ------------")
+            print(f"infer_ts: {infer_ts}")
+            if not hist_tail.empty:
+                print(hist_tail.to_string(index=False))
+                print(f"last_hist_ts: {hist_tail[cfg.ts_col].max()}")
+            else:
+                print("(empty)")
+            print("==================================================\n")
+            DEBUG_PRINTED = True

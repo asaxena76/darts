@@ -111,8 +111,11 @@ def main():
         target_col=cfg.target_col,
         covariate_cols=[
             # keep any that exist in your CSV; others are ignored gracefully
-            "mwt", "mrtd_prev", "mwt_prev", "am_prev", "om_prev",
+            "mwt",
+            "mrtd_prev", "mwt_prev", "am_prev", "om_prev",
+            "mrtd_park_prev", "mwt_park_prev", "am_park_prev", "om_park_prev",
             "mrtd_sum_prev", "mwt_sum_prev", "am_sum_prev", "om_sum_prev",
+            "mrtd_park_sum_prev", "mwt_park_sum_prev", "am_park_sum_prev", "om_park_sum_prev",
         ],
         lags=24,
         lags_past_covariates=2,
@@ -153,6 +156,7 @@ def main():
         results["by_attraction"].to_csv(run_dir / "by_attraction.csv", index=False)
         results["by_infer_hour"].to_csv(run_dir / "by_infer_hour.csv", index=False)
         results["raw"].to_csv(run_dir / "raw_results.csv", index=False)
+        results["raw_detailed"].to_csv(run_dir / "raw_results_detailed.csv", index=False)
         (run_dir / "overall.json").write_text(json.dumps(results["overall"], indent=2))
         log.info("Wrote: by_attraction.csv, by_infer_hour.csv, raw_results.csv, overall.json")
 

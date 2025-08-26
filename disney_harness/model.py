@@ -91,7 +91,7 @@ class DartsLGBMDisneyModel(DisneyModel):
         target_col: str = "mrtd",
         covariate_cols: Optional[Sequence[str]] = None,
         lags: int = 24,
-        lags_past_covariates: int = 2,
+        lags_past_covariates: int = 24,
         output_chunk_length: int = 24,
         random_state: int = 42,
     ):
