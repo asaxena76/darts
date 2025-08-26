@@ -33,8 +33,8 @@ class DisneyModel(ABC):
             park_close_ts: pd.Timestamp,
     ) -> pd.Series:
         """
-        Predict per-MINUTE target from the *next minute after infer_history_df.index.max()*
-        up to `park_close_ts` (exclusive). Return a pd.Series (DatetimeIndex, minutely).
+        Predict per-HOUR target from the *next hour after infer_history_df.index.max()*
+        up to `park_close_ts` (exclusive). Return a pd.Series (DatetimeIndex, hourly).
         """
         ...
 
@@ -43,7 +43,7 @@ class NaiveLastHourCarryForward(DisneyModel):
     """
     Dummy baseline:
       - Use the last observed HOURLY mrtd value in infer_history_df.
-      - Expand it to per-minute for the rest of the day.
+      - Predict that value for each hour until park close.
       - If no last value exists (NaN or empty), predict 0.
 
     This gives us a trivial, stable baseline for harness wiring & metrics.
@@ -63,22 +63,20 @@ class NaiveLastHourCarryForward(DisneyModel):
         else:
             last_val = infer_history_df[self.target_col].dropna().iloc[-1] if not infer_history_df[self.target_col].dropna().empty else 0.0
 
-        start = infer_history_df.index.max()
-        # start at the next hour after the latest history timestamp
-        start_minute = (start + pd.Timedelta(hours=1)).ceil("min")
-
-        if start_minute >= park_close_ts:
+        last_obs: pd.Timestamp = infer_history_df.index.max()
+        start_hour = (last_obs + pd.Timedelta(hours=1)).floor("h")
+        if start_hour >= park_close_ts:
             return pd.Series(dtype=float)
 
-        idx = pd.date_range(start=start_minute, end=park_close_ts - pd.Timedelta(minutes=1), freq="min")
+        idx = pd.date_range(start=start_hour, end=park_close_ts - pd.Timedelta(hours=1), freq="h")
         return pd.Series(last_val, index=idx, name=self.target_col)
 
 
 class DartsLGBMDisneyModel(DisneyModel):
     """
     LightGBMModel (darts) implementation that trains once per attraction (on hourly data),
-    and predicts hourly to park-close at inference; results are expanded to *per-minute*
-    by forward-filling within each hour (to match the harness interface).
+    and predicts hourly to park-close at inference; results are returned as *per-hour*
+    (no minute upsampling; predictions and truth are aligned on hourly timestamps).
     """
 
     def __init__(
@@ -167,10 +165,10 @@ class DartsLGBMDisneyModel(DisneyModel):
         if infer_history_df.empty:
             return pd.Series(dtype=float)
 
-        # Determine start minute (next minute after last observed hour)
+        # Determine start hour (next hour after last observed hour)
         last_obs: pd.Timestamp = infer_history_df.index.max()
-        start_minute = (last_obs + pd.Timedelta(hours=1)).ceil("min")
-        if start_minute >= park_close_ts:
+        start_hour = (last_obs + pd.Timedelta(hours=1)).floor("h")
+        if start_hour >= park_close_ts:
             return pd.Series(dtype=float)
 
         # Build hourly history series (up to last observed hour)
@@ -183,7 +181,6 @@ class DartsLGBMDisneyModel(DisneyModel):
             cov_hist_s = self.cov_scaler.transform(cov_hist_ts)
 
         # How many *hourly* steps until close? (start at next full hour)
-        start_hour = (last_obs + pd.Timedelta(hours=1)).floor("h")
         # create an hourly range [start_hour, park_close_ts) with step 1h
         if start_hour >= park_close_ts:
             return pd.Series(dtype=float)
@@ -196,21 +193,10 @@ class DartsLGBMDisneyModel(DisneyModel):
         pred_s = self.model.predict(n=n_steps, series=y_hist_s, past_covariates=cov_hist_s)
         pred_y = self.ts_scaler.inverse_transform(pred_s)
 
-        # Convert hourly predictions to per-minute series by ffill within each hour
-        pred_df = pred_y.to_dataframe(time_as_index=True)  # index is hourly timestamps
-        # Up-sample to minutes and forward-fill
-        minute_index = pd.date_range(start=start_minute, end=park_close_ts - pd.Timedelta(minutes=1), freq="min")
-
-        # Build a minutely series by reindexing the hourly preds over a dense minutely range then ffill
-        # First map hourly index -> value, then resample
+        # Return hourly predictions directly, aligned to intended hourly targets
+        pred_df = pred_y.to_dataframe(time_as_index=True)  # hourly timestamps
         hourly_series = pred_df.iloc[:, 0]  # first/only column is the target
-        # Ensure we include the first minute: align to the hour grid and then ffill
-        dense_minute = pd.date_range(
-            start=hourly_series.index.min(),
-            end=park_close_ts - pd.Timedelta(minutes=1),
-            freq="min",
-        )
-        minute_filled = hourly_series.reindex(dense_minute).ffill()
-        minute_filled = minute_filled.reindex(minute_index)
-        minute_filled.name = self.target_col
-        return minute_filled
+        # Ensure index matches the intended hourly targets
+        hourly_series = hourly_series.reindex(hourly_targets)
+        hourly_series.name = self.target_col
+        return hourly_series

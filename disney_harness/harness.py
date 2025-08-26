@@ -41,28 +41,24 @@ def _load_hourly_df(cfg: HarnessConfig) -> pd.DataFrame:
         log.warning("Loaded 0 rows from %s", cfg.csv_path)
     return df
 
-def _per_minute_truth_for_day(day_hourly: pd.DataFrame, cfg: HarnessConfig) -> pd.Series:
+def _hourly_truth_for_day(day_hourly: pd.DataFrame, cfg: HarnessConfig) -> pd.Series:
     """
-    Convert hourly maxima to minutely truth via forward-fill within each hour.
-    This is a placeholder until you wire real per-minute ground truth.
+    Use the hourly target as-is, restricted to park hours [open, close).
     """
     if day_hourly.empty:
         return pd.Series(dtype=float)
 
-    # Build minutely index from park open to close
     day = day_hourly[cfg.ts_col].dt.normalize().iloc[0]
-    start = day + pd.Timedelta(hours=PARK_OPEN_HOUR)
-    end = day + pd.Timedelta(hours=PARK_CLOSE_HOUR) - pd.Timedelta(minutes=1)
-    minute_index = pd.date_range(start=start, end=end, freq="min")
+    start_hour = day + pd.Timedelta(hours=PARK_OPEN_HOUR)
+    end_hour   = day + pd.Timedelta(hours=PARK_CLOSE_HOUR) - pd.Timedelta(hours=1)
 
-    # Reindex hourly to minute and ffill within the hour
-    hourly = day_hourly.set_index(cfg.ts_col)[cfg.target_col].asfreq("h")
-    # For forward-fill, first upsample to minute with pad inside hour blocks:
-    # (This is a simple/naive stand-in for real minutely truth)
-    minute_series = hourly.reindex(pd.date_range(hourly.index.min(), hourly.index.max(), freq="min")).ffill()
-    # Clip to park hours window
-    minute_series = minute_series.reindex(minute_index)
-    return minute_series
+    hourly = (
+        day_hourly.set_index(cfg.ts_col)[cfg.target_col]
+        .asfreq("h")
+        .sort_index()
+    )
+    hourly = hourly.loc[(hourly.index >= start_hour) & (hourly.index <= end_hour)]
+    return hourly
 
 def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
     df = _load_hourly_df(cfg)
@@ -97,8 +93,8 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
             log.info("  • Training model for '%s' on %s rows (<= %s)", gw, len(hist_upto_cutoff), train_cutoff)
             model.fit(hist_upto_cutoff.set_index(cfg.ts_col))
 
-            # Build minute-level TRUTH for the full day window
-            truth_minutely = _per_minute_truth_for_day(day_df[day_df[cfg.attraction_col] == gw], cfg)
+            # Build hourly TRUTH for the full day window
+            truth_hourly = _hourly_truth_for_day(day_df[day_df[cfg.attraction_col] == gw], cfg)
 
             # infer from each hour (open..23)
             for infer_hour in range(PARK_OPEN_HOUR, PARK_CLOSE_HOUR):
@@ -110,7 +106,7 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
                 pred = model.predict_until_close(hist_to_now, park_close)
 
                 # restrict truth to same prediction window
-                truth_window = truth_minutely.loc[pred.index.min(): pred.index.max()] if not pred.empty else pd.Series(dtype=float)
+                truth_window = truth_hourly.loc[pred.index.min(): pred.index.max()] if not pred.empty else pd.Series(dtype=float)
 
                 # optional debug: for first test day & chosen hour, print aligned rows + tails of train/history
                 if (
@@ -130,7 +126,7 @@ def evaluate_model(cfg: HarnessConfig, model: DisneyModel) -> Dict[str, Any]:
                         aligned = aligned.assign(abs_err=(aligned["truth"] - aligned["pred"]).abs())
                         manual_mae = float(aligned["abs_err"].mean())
                         head_n = aligned.head(cfg.debug_rows)
-                        print("\n========== DEBUG SAMPLE (truth vs pred) ==========")
+                        print("\n========== DEBUG SAMPLE (hourly truth vs hourly pred) ==========")
                         print(f"Day: {day.date()} | Attraction: {gw} | infer_hour: {infer_hour}")
                         print(head_n.reset_index().rename(columns={"index": "time"}).to_string(index=False))
                         print(f"\nmanual MAE over these {len(head_n)} rows: {manual_mae:.4f}")
